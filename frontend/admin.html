@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>后端管理 - 井字棋</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #F8FAFC; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .container { max-width: 500px; margin: 0 auto; padding: 24px 16px; }
+    h2 { text-align: center; margin-bottom: 24px; }
+    h3 { font-size: 1rem; color: #64748B; margin-bottom: 8px; }
+    .section { margin-bottom: 24px; }
+    input, select, textarea { padding: 10px; border: 2px solid #E2E8F0; border-radius: 8px; font-size: 1rem; width: 100%; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #3B82F6; }
+    button { padding: 10px 16px; border: none; border-radius: 8px; font-size: 0.95rem; cursor: pointer; }
+    .btn-primary { background: #3B82F6; color: white; }
+    .btn-danger { background: #EF4444; color: white; }
+    .btn-sm { padding: 4px 10px; font-size: 0.8rem; }
+    .btn-xs { padding: 2px 6px; font-size: 0.7rem; }
+    button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .result-box { background: #ECFDF5; border: 1px solid #10B981; border-radius: 8px; padding: 12px; margin-top: 8px; }
+    .hidden { display: none; }
+    .error-text { color: #EF4444; font-size: 0.9rem; margin-top: 8px; }
+    .ok-msg { color: #10B981; font-weight: 600; margin-top: 6px; }
+    .room-list { list-style: none; }
+    .room-item { background: white; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .room-id { font-weight: 700; font-family: monospace; font-size: 1.1rem; letter-spacing: 0.05em; }
+    .room-meta { font-size: 0.8rem; color: #64748B; }
+    .force-form { background: white; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px; margin-top: 8px; }
+    .force-form label { font-size: 0.85rem; color: #64748B; display: block; margin: 8px 0 4px; }
+    .force-form select, .force-form input { margin-bottom: 4px; }
+    .flex-row { display: flex; gap: 8px; align-items: center; }
+    .flex-row input { flex: 1; }
+    pre { background: #F1F5F9; border-radius: 6px; padding: 12px; font-size: 0.8rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
+    .badge-waiting { background: #FEF3C7; color: #D97706; }
+    .badge-playing { background: #DBEAFE; color: #2563EB; }
+    .badge-finished { background: #E2E8F0; color: #64748B; }
+
+    /* 可视棋盘编辑器 */
+    .mini-board { display: grid; gap: 2px; width: min(280px, 80vw); aspect-ratio: 1; margin: 8px 0; }
+    .mini-board.classic { grid-template-columns: repeat(3, 1fr); }
+    .mini-board.surface { grid-template-columns: repeat(9, 1fr); grid-template-rows: repeat(3, 1fr); gap: 1px; }
+    .mini-board.ultimate { grid-template-columns: repeat(9, 1fr); gap: 1px; }
+    .mini-cell { aspect-ratio: 1; border: 1px solid #CBD5E1; border-radius: 3px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-weight: 700; font-size: 1rem; background: white; user-select: none; }
+    .mini-cell:hover { background: #F1F5F9; }
+    .mini-cell.X { color: #3B82F6; background: #DBEAFE; }
+    .mini-cell.O { color: #EF4444; background: #FEE2E2; }
+    .mini-cell.invalid { background: #E2E8F0; color: #94A3B8; cursor: default; font-size: 0.7rem; }
+    .mini-cell.large-border-r { border-right: 3px solid #1E293B; }
+    .mini-cell.large-border-b { border-bottom: 3px solid #1E293B; }
+    .cell-tools { display: flex; gap: 4px; margin-bottom: 8px; }
+    .cell-tools button { padding: 6px 12px; font-size: 0.8rem; }
+    .cell-tools button.active { box-shadow: 0 0 0 2px #3B82F6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>后端管理</h2>
+
+    <!-- 活跃房间列表 -->
+    <div class="section">
+      <div class="flex-row">
+        <h3>活跃房间</h3>
+        <button id="btn-refresh" class="btn-primary btn-sm">刷新</button>
+        <button id="btn-clean" class="btn-danger btn-sm">清理全部</button>
+      </div>
+      <ul id="room-list" class="room-list"><li style="color:#64748B">点击刷新加载...</li></ul>
+    </div>
+
+    <!-- 查询 & 操作 -->
+    <div class="section">
+      <h3>房间操作</h3>
+      <div class="flex-row">
+        <input type="text" id="room-id" placeholder="房间号" maxlength="6" style="text-transform:uppercase">
+        <button id="btn-lookup" class="btn-primary">查询</button>
+      </div>
+      <div id="lookup-result"></div>
+    </div>
+
+    <!-- API 端点 -->
+    <div class="section">
+      <h3>API 端点</h3>
+      <pre>POST /api/games        — 创建对局
+POST /api/games/:id/join — 加入对局
+GET  /api/games/:id     — 查询对局
+WS   /api/games/:id/ws  — 实时对战
+GET  /api/admin/games   — 列出所有房间
+POST /api/admin/games/:id/force — 强制操作
+{ action: "set_cell" | "set_turn" | "force_winner" | "kick_player" | "reset", params: {...} }</pre>
+    </div>
+  </div>
+
+  <script>
+    // 当前选中的画笔值
+    var paintValue = "X";
+
+    // === 房间列表 ===
+    var autoRefreshTimer = null;
+
+    document.getElementById("btn-refresh").onclick = refreshList;
+    document.getElementById("btn-clean").onclick = cleanAll;
+    refreshList();
+    startAutoRefresh();
+
+    async function cleanAll() {
+      if (!confirm("确定要清理全部房间记录吗？")) return;
+      var btn = document.getElementById("btn-clean");
+      btn.disabled = true;
+      btn.textContent = "清理中...";
+      try {
+        var res = await fetch("/api/admin/clean", { method: "POST" });
+        var data = await res.json();
+        alert(data.message || "已清理");
+        refreshList();
+      } catch (e) {
+        alert("清理失败: " + e.message);
+      }
+      btn.disabled = false;
+      btn.textContent = "清理全部";
+    }
+
+    function startAutoRefresh() {
+      if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+      autoRefreshTimer = setInterval(refreshList, 3000);
+    }
+
+    // 页面隐藏时暂停刷新，显示时恢复
+    document.addEventListener("visibilitychange", function() {
+      if (document.hidden) {
+        if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+      } else {
+        startAutoRefresh();
+        refreshList();
+      }
+    });
+
+    async function refreshList() {
+      var list = document.getElementById("room-list");
+      var btn = document.getElementById("btn-refresh");
+      btn.disabled = true;
+      try {
+        var res = await fetch("/api/admin/games");
+        var rooms = await res.json();
+        if (!Array.isArray(rooms)) throw new Error("无效响应");
+        if (rooms.length === 0) {
+          list.innerHTML = '<li style="color:#64748B">暂无活跃房间</li>';
+        } else {
+          list.innerHTML = rooms.map(function(r) {
+            var badgeClass = r.status === "waiting" ? "badge-waiting" : r.status === "playing" ? "badge-playing" : "badge-finished";
+            return '<li class="room-item">' +
+              '<div><span class="room-id">' + r.gameId + '</span> ' +
+              '<span class="badge ' + badgeClass + '">' + r.status + '</span></div>' +
+              '<div class="room-meta">' + r.mode + ' | ' + r.playerCount + '人</div>' +
+              '<button class="btn-primary btn-sm select-room" data-id="' + r.gameId + '">操作</button>' +
+              '</li>';
+          }).join("");
+          list.querySelectorAll(".select-room").forEach(function(btn) {
+            btn.onclick = function() {
+              document.getElementById("room-id").value = this.dataset.id;
+              lookupRoom(this.dataset.id);
+            };
+          });
+        }
+      } catch (e) {
+        list.innerHTML = '<li style="color:#EF4444">加载失败: ' + e.message + '</li>';
+      }
+      btn.disabled = false;
+    }
+
+    // === 查询房间 ===
+    document.getElementById("btn-lookup").onclick = function() {
+      var id = document.getElementById("room-id").value.trim().toUpperCase();
+      if (!id) return;
+      lookupRoom(id);
+    };
+
+    async function lookupRoom(gameId) {
+      var container = document.getElementById("lookup-result");
+      container.innerHTML = '<p style="color:#64748B">查询中...</p>';
+
+      try {
+        var res = await fetch("/api/games/" + gameId);
+        var data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        var html = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        html += renderBoardEditor(gameId, data);
+        html += renderForceForm(gameId, data);
+        container.innerHTML = html;
+        bindForceButtons();
+      } catch (e) {
+        container.innerHTML = '<p class="error-text">查询失败: ' + e.message + '</p>';
+      }
+    }
+
+    // === 可视棋盘编辑器 ===
+    function renderBoardEditor(gameId, state) {
+      var mode = state.mode;
+      var board = state.board;
+      var html = '<div class="force-form"><h3 style="margin-bottom:8px">格子编辑器</h3>';
+      html += '<div class="cell-tools">' +
+        '<span style="font-size:0.8rem;color:#64748B;margin-right:8px">画笔:</span>' +
+        '<button class="btn-xs paint-btn active" data-v="X" style="background:#DBEAFE;color:#3B82F6">X</button>' +
+        '<button class="btn-xs paint-btn" data-v="O" style="background:#FEE2E2;color:#EF4444">O</button>' +
+        '<button class="btn-xs paint-btn" data-v="" style="background:#F1F5F9;color:#64748B">空</button>' +
+        '<span style="font-size:0.75rem;color:#94A3B8;margin-left:auto">点击格子修改</span>' +
+        '</div>';
+
+      if (mode === "classic") {
+        html += '<div class="mini-board classic" id="mini-board">';
+        for (var i = 0; i < 9; i++) {
+          var v = board.cells ? board.cells[i] : "";
+          html += '<div class="mini-cell ' + v + '" data-idx="' + i + '">' + (v || '') + '</div>';
+        }
+        html += '</div>';
+      } else if (mode === "surface3d") {
+        html += '<div style="display:flex;flex-direction:column;gap:4px" id="mini-board">';
+        var layerNames = ["下层(z=1)", "中层(z=2)", "上层(z=3)"];
+        for (var z = 0; z < 3; z++) {
+          html += '<div style="font-size:0.75rem;color:#64748B;margin-top:2px">' + layerNames[z] + '</div>';
+          html += '<div class="mini-board classic" style="width:180px">';
+          for (var y = 0; y < 3; y++) {
+            for (var x = 0; x < 3; x++) {
+              var idx = z*9 + y*3 + x;
+              var invalid = (x===1 && y===1 && z===1);
+              var v = board.cells ? board.cells[idx] : "";
+              if (invalid) {
+                html += '<div class="mini-cell invalid">×</div>';
+              } else {
+                html += '<div class="mini-cell ' + v + '" data-idx="' + idx + '">' + (v || '') + '</div>';
+              }
+            }
+          }
+          html += '</div>';
+        }
+        html += '</div>';
+      } else if (mode === "ultimate") {
+        html += '<div class="mini-board ultimate" id="mini-board">';
+        var smallCells = board.smallCells || [];
+        for (var gr = 0; gr < 9; gr++) {
+          for (var gc = 0; gc < 9; gc++) {
+            var lr = Math.floor(gr / 3), lc = Math.floor(gc / 3);
+            var sr = gr % 3, sc = gc % 3;
+            var idx = gr * 9 + gc;
+            var v = smallCells[idx] || "";
+            var cls = ['mini-cell', v];
+            if (sc === 2 && lc < 2) cls.push('large-border-r');
+            if (sr === 2 && lr < 2) cls.push('large-border-b');
+            html += '<div class="' + cls.join(' ') + '" data-lr="' + lr + '" data-lc="' + lc + '" data-sr="' + sr + '" data-sc="' + sc + '" data-type="ultimate">' + (v || '') + '</div>';
+          }
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    // 格子点击处理（委托给 #lookup-result）
+    function bindForceButtons() {
+      var container = document.getElementById("lookup-result");
+
+      // 画笔选择
+      container.querySelectorAll(".paint-btn").forEach(function(btn) {
+        btn.onclick = function() {
+          container.querySelectorAll(".paint-btn").forEach(function(b) { b.classList.remove("active"); });
+          this.classList.add("active");
+          paintValue = this.dataset.v;
+        };
+      });
+
+      // 棋盘格子点击
+      container.querySelectorAll(".mini-cell:not(.invalid)").forEach(function(cell) {
+        cell.onclick = async function() {
+          var gameId = document.getElementById("room-id").value.trim().toUpperCase();
+          if (!gameId) return;
+          var params = { value: paintValue };
+
+          if (this.dataset.type === "ultimate") {
+            params.largeR = parseInt(this.dataset.lr);
+            params.largeC = parseInt(this.dataset.lc);
+            params.smallR = parseInt(this.dataset.sr);
+            params.smallC = parseInt(this.dataset.sc);
+          } else if (this.dataset.idx !== undefined) {
+            params.index = parseInt(this.dataset.idx);
+          }
+          // surface3d 需要用不同的方式处理... data-idx 存储了线性索引
+          // 但 set_cell 对于 surface3d 需要 {x,y,z}
+          // 简化：用 data-idx 推算 x,y,z
+          if (document.getElementById("mini-board") && !this.dataset.type) {
+            var idx = parseInt(this.dataset.idx);
+            if (idx >= 0 && idx < 27) {
+              // 通过查找周围的 z 层判断模式
+              var isSurface = false;
+              // 简单判断：最顶层容器有3个子层
+              var boardEl = document.getElementById("mini-board");
+              if (boardEl && boardEl.querySelector(".mini-board")) {
+                // surface3d mode
+                params.index = idx; // 用线性索引，set_cell 会正确处理
+              }
+            }
+          }
+
+          try {
+            var res = await fetch("/api/admin/games/" + gameId + "/force", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "set_cell", params: params })
+            });
+            var data = await res.json();
+            if (data.ok) {
+              // 更新格子的类名和文本
+              this.className = this.className.replace(/ X| O/g, "").replace(/mini-cell/, "mini-cell") + " " + paintValue;
+              this.textContent = paintValue || "";
+              if (paintValue === "X") this.classList.add("X");
+              else if (paintValue === "O") this.classList.add("O");
+            } else {
+              alert(data.message);
+            }
+          } catch (e) {
+            alert("修改失败: " + e.message);
+          }
+        };
+      });
+    }
+
+    // === 强制操作表单 ===
+    function renderForceForm(gameId, state) {
+      return '<div class="force-form">' +
+        '<h3 style="margin-bottom:10px">强制操作</h3>' +
+        '<label>切换回合</label>' +
+        '<div class="flex-row">' +
+          '<select id="force-turn"><option value="0">玩家 0 (X)</option><option value="1">玩家 1 (O)</option></select>' +
+          '<button class="btn-primary btn-sm" data-action="set_turn" data-gid="' + gameId + '">执行</button>' +
+        '</div>' +
+        '<label>强制结束</label>' +
+        '<div class="flex-row">' +
+          '<select id="force-winner"><option value="0">玩家 0 胜</option><option value="1">玩家 1 胜</option><option value="draw">平局</option></select>' +
+          '<button class="btn-danger btn-sm" data-action="force_winner" data-gid="' + gameId + '">执行</button>' +
+        '</div>' +
+        '<label>踢出玩家</label>' +
+        '<div class="flex-row">' +
+          '<select id="force-kick"><option value="0">玩家 0</option><option value="1">玩家 1</option></select>' +
+          '<button class="btn-danger btn-sm" data-action="kick_player" data-gid="' + gameId + '">执行</button>' +
+        '</div>' +
+        '<label>重置对局</label>' +
+        '<div><button class="btn-primary btn-sm" data-action="reset" data-gid="' + gameId + '">重置棋盘</button></div>' +
+        '<div id="force-result" style="margin-top:8px"></div>' +
+        '</div>';
+    }
+
+    // 强制操作按钮（重新绑定，因为 DOM 重绘了）
+    document.getElementById("lookup-result").addEventListener("click", async function(e) {
+      if (!e.target.dataset.action) return;
+      var action = e.target.dataset.action;
+      var gameId = e.target.dataset.gid;
+      var params = {};
+
+      if (action === "set_turn") {
+        params.turn = parseInt(document.getElementById("force-turn").value);
+      } else if (action === "force_winner") {
+        var v = document.getElementById("force-winner").value;
+        params.winner = v === "draw" ? "draw" : parseInt(v);
+      } else if (action === "kick_player") {
+        params.playerIndex = parseInt(document.getElementById("force-kick").value);
+      }
+
+      var resultDiv = document.getElementById("force-result");
+      resultDiv.innerHTML = '<p style="color:#64748B">执行中...</p>';
+
+      try {
+        var res = await fetch("/api/admin/games/" + gameId + "/force", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: action, params: params })
+        });
+        var data = await res.json();
+        if (data.ok) {
+          resultDiv.innerHTML = '<p class="ok-msg">' + data.message + '</p>';
+          setTimeout(function() { lookupRoom(gameId); }, 500);
+          setTimeout(refreshList, 600);
+        } else {
+          resultDiv.innerHTML = '<p class="error-text">' + data.message + '</p>';
+        }
+      } catch (e) {
+        resultDiv.innerHTML = '<p class="error-text">请求失败: ' + e.message + '</p>';
+      }
+    });
+  </script>
+</body>
+</html>
