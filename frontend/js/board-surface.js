@@ -23,6 +23,9 @@ export function renderSurfaceBoard(container, controller, onCellClick) {
       for (let x = 0; x < 3; x++) {
         const cell = document.createElement("div");
         cell.className = "cell";
+        cell.dataset.x = x;
+        cell.dataset.y = y;
+        cell.dataset.z = z;
 
         const idx = z * 9 + y * 3 + x;
 

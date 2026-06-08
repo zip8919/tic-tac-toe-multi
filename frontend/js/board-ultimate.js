@@ -33,6 +33,10 @@ export function renderUltimateBoard(container, controller, onCellClick) {
 
       const cell = document.createElement("div");
       cell.className = "cell";
+      cell.dataset.largeR = largeR;
+      cell.dataset.largeC = largeC;
+      cell.dataset.smallR = smallR;
+      cell.dataset.smallC = smallC;
 
       // 大格分隔线
       if (smallC === 2 && largeC < 2) cell.classList.add("large-border-right");

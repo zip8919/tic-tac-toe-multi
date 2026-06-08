@@ -8,7 +8,7 @@ import { renderSurfaceBoard } from "./board-surface.js";
 import { renderUltimateBoard } from "./board-ultimate.js";
 import { GameController } from "./game-controller.js";
 import { connectWebSocket, sendMove, sendPing } from "./api.js";
-import { getAIMove } from "./ai.js";
+import { createAI } from "./ai.js";
 
 // 页面元素
 const pages = {
@@ -25,6 +25,72 @@ let currentController = null;
 let ws = null;
 let pingInterval = null;
 let zoomLevel = 1;
+let hintMove = null;       // AI 提示推荐的着法
+let hintBtnVisible = false;
+let quitPressTimer = null;
+let quitLongFired = false;
+
+// 退出按钮：单击退出，长按 1.2s 切换提示按钮（只绑定一次）
+function setupQuitButton() {
+  const btnQuit = document.getElementById("btn-quit");
+  const btnHint = document.getElementById("btn-hint");
+  if (!btnQuit || !btnHint || btnQuit._hintSetup) return;
+  btnQuit._hintSetup = true;
+
+  btnHint.classList.add("hidden");
+
+  function startQuitPress(e) {
+    quitLongFired = false;
+    quitPressTimer = setTimeout(() => {
+      quitLongFired = true;
+      quitPressTimer = null;
+      hintBtnVisible = !hintBtnVisible;
+      if (hintBtnVisible) {
+        btnHint.classList.remove("hidden");
+      } else {
+        btnHint.classList.add("hidden");
+        hintMove = null;
+        updateGameUI();
+      }
+    }, 1200);
+  }
+
+  function endQuitPress(e) {
+    if (quitLongFired) {
+      e.preventDefault();
+      return;
+    }
+    if (quitPressTimer) {
+      clearTimeout(quitPressTimer);
+      quitPressTimer = null;
+      e.stopPropagation();
+      window.goLobby();
+    }
+  }
+
+  function cancelQuitPress() {
+    if (quitPressTimer) {
+      clearTimeout(quitPressTimer);
+      quitPressTimer = null;
+    }
+  }
+
+  btnQuit.addEventListener("mousedown", startQuitPress);
+  btnQuit.addEventListener("mouseup", endQuitPress);
+  btnQuit.addEventListener("mouseleave", cancelQuitPress);
+  btnQuit.addEventListener("touchstart", startQuitPress, { passive: true });
+  btnQuit.addEventListener("touchend", endQuitPress);
+  btnQuit.addEventListener("touchcancel", cancelQuitPress);
+
+  // 提示按钮：AI 推演最佳着法
+  btnHint.onclick = async (e) => {
+    e.stopPropagation();
+    if (!currentController || currentController.status !== "playing") return;
+    const ai = createAI(currentController.mode, 3);
+    hintMove = await ai.getMove(currentController);
+    updateGameUI();
+  };
+}
 
 function navigate(page, params = {}) {
   for (const id of pageIds) {
@@ -54,16 +120,22 @@ function startOnlineGame(params) {
 }
 
 function startGame(params) {
-  const { mode, playType, gameId, playerToken, playerName, isHost } = params;
+  const { mode, playType, gameId, playerToken, playerName, isHost, difficulty } = params;
 
   // 清理上一局
   cleanupGame();
 
+  // AI 实例（如果需要）
+  if (playType === "ai") {
+    window._aiPlayer = createAI(mode, difficulty || 1);
+  }
+
   // 初始化控制器
+  const aiDiffName = window._aiPlayer ? window._aiPlayer.getDifficultyName() : "";
   const playerNames = playType === "online"
     ? [isHost ? playerName : "等待中...", isHost ? "等待中..." : playerName]
     : playType === "ai"
-      ? [playerName || "你 (✕)", "AI (◯)"]
+      ? [playerName || "你 (✕)", "AI-" + aiDiffName + " (◯)"]
       : ["玩家1 (✕)", "玩家2 (◯)"];
 
   currentController = new GameController(mode, playType, {
@@ -104,10 +176,11 @@ function startGame(params) {
     zoomLevel = Math.max(0.5, zoomLevel - 0.1);
     applyZoom();
   };
-  document.getElementById("btn-quit").onclick = (e) => {
-    e.stopPropagation();
-    window.goLobby();
-  };
+  // 长按退出切换提示（只绑定一次）
+  setupQuitButton();
+  hintBtnVisible = false;
+  document.getElementById("btn-hint").classList.add("hidden");
+  hintMove = null;
 
   applyZoom();
   zoomLevel = 1;
@@ -117,6 +190,7 @@ function startGame(params) {
 function handleServerMessage(msg) {
   if (msg.type === "state") {
     currentController.applyServerState(msg.state);
+    updateGameUI();
   } else if (msg.type === "error") {
     document.getElementById("status-text").textContent = "错误: " + msg.message;
   } else if (msg.type === "joined") {
@@ -144,6 +218,9 @@ function handleServerMessage(msg) {
 function handleCellClick(move) {
   if (!currentController) return;
 
+  // 清除 AI 提示
+  hintMove = null;
+
   if (currentController.playType === "online") {
     // 在线模式：发送到服务端
     sendMove(ws, move);
@@ -163,13 +240,10 @@ function handleCellClick(move) {
 
 async function triggerAI() {
   if (!currentController || currentController.status !== "playing") return;
-  if (currentController.currentTurn !== 1) return; // AI 是后手
+  if (currentController.currentTurn !== 1) return; // AI 是后手（◯）
+  if (!window._aiPlayer) return;
 
-  const aiMove = await getAIMove(
-    () => currentController.getValidMoves(),
-    currentController.board,
-    currentController.context,
-  );
+  const aiMove = await window._aiPlayer.getMove(currentController);
 
   if (aiMove && currentController && currentController.status === "playing") {
     currentController.tryLocalMove(aiMove);
@@ -254,6 +328,31 @@ function updateGameUI() {
   }
 
   renderBoard();
+  applyHintHighlight();
+}
+
+// 高亮 AI 提示的推荐格子
+function applyHintHighlight() {
+  // 清除旧高亮
+  document.querySelectorAll("#board-container .hint-cell").forEach(el => el.classList.remove("hint-cell"));
+
+  if (!hintMove || !currentController || currentController.status !== "playing") return;
+
+  let selector = "";
+  const mode = currentController.mode;
+
+  if (mode === "classic") {
+    selector = `[data-index="${hintMove.index}"]`;
+  } else if (mode === "surface3d") {
+    selector = `[data-x="${hintMove.x}"][data-y="${hintMove.y}"][data-z="${hintMove.z}"]`;
+  } else if (mode === "ultimate") {
+    selector = `[data-large-r="${hintMove.largeR}"][data-large-c="${hintMove.largeC}"][data-small-r="${hintMove.smallR}"][data-small-c="${hintMove.smallC}"]`;
+  }
+
+  if (selector) {
+    const cell = document.querySelector("#board-container " + selector);
+    if (cell) cell.classList.add("hint-cell");
+  }
 }
 
 function applyZoom() {
@@ -272,6 +371,9 @@ function cleanupGame() {
     pingInterval = null;
   }
   currentController = null;
+  window._aiPlayer = null;
+  hintMove = null;
+  hintBtnVisible = false;
 }
 
 // 全局返回主菜单（供其他模块调用）

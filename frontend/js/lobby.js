@@ -1,4 +1,4 @@
-// 主菜单：模式选择 + 对战方式选择
+// 主菜单：模式选择 + 对战方式选择 + AI 难度选择
 
 const MODES = [
   {
@@ -21,7 +21,14 @@ const MODES = [
 const PLAY_TYPES = [
   { id: "local", name: "本地双人", desc: "两人在同一设备轮流落子" },
   { id: "online", name: "在线联机", desc: "通过网络与远程对手对战" },
-  { id: "ai", name: "AI 对战", desc: "与电脑 AI 对弈（简单模式）" },
+  { id: "ai", name: "AI 对战", desc: "与电脑 AI 对弈，四种难度可选" },
+];
+
+const DIFFICULTIES = [
+  { id: 0, name: "简单", desc: "随机落子，适合入门" },
+  { id: 1, name: "普通", desc: "基础策略，懂得抢占要点" },
+  { id: 2, name: "困难", desc: "向前推算数步" },
+  { id: 3, name: "地狱", desc: "深度推算，高手挑战" },
 ];
 
 let selectedMode = null;
@@ -32,7 +39,6 @@ export function showLobby(container, onNavigate) {
   const modeList = container.querySelector("#mode-list");
   const playTypeList = container.querySelector("#play-type-list");
 
-  // 渲染模式卡片
   modeList.innerHTML = '<div class="mode-cards">' +
     MODES.map(m => `
       <div class="mode-card" data-mode="${m.id}">
@@ -45,7 +51,6 @@ export function showLobby(container, onNavigate) {
   modeList.classList.remove("hidden");
   playTypeList.classList.add("hidden");
 
-  // 模式选择事件
   modeList.querySelectorAll(".mode-card").forEach(card => {
     card.addEventListener("click", () => {
       selectedMode = card.dataset.mode;
@@ -53,7 +58,6 @@ export function showLobby(container, onNavigate) {
     });
   });
 
-  // 规则按钮
   container.querySelector("#btn-rules").onclick = () => onNavigate("rules");
 }
 
@@ -76,6 +80,8 @@ function showPlayTypes(container, onNavigate) {
       const playType = btn.dataset.type;
       if (playType === "online") {
         onNavigate("online", { mode: selectedMode });
+      } else if (playType === "ai") {
+        showDifficulties(container, onNavigate);
       } else {
         onNavigate("game", { mode: selectedMode, playType });
       }
@@ -84,5 +90,30 @@ function showPlayTypes(container, onNavigate) {
 
   container.querySelector(".back-btn").onclick = () => {
     container.classList.add("hidden");
+  };
+}
+
+function showDifficulties(container, onNavigate) {
+  container.innerHTML = `
+    <p class="subtitle">选择 AI 难度</p>
+    <div class="play-type-cards">
+      ${DIFFICULTIES.map(d => `
+        <button class="play-type-btn" data-diff="${d.id}">
+          <strong>${d.name}</strong> — ${d.desc}
+        </button>
+      `).join("")}
+    </div>
+    <button class="btn-link back-btn">重新选择对战方式</button>
+  `;
+
+  container.querySelectorAll(".play-type-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const difficulty = parseInt(btn.dataset.diff);
+      onNavigate("game", { mode: selectedMode, playType: "ai", difficulty });
+    });
+  });
+
+  container.querySelector(".back-btn").onclick = () => {
+    showPlayTypes(container, onNavigate);
   };
 }
